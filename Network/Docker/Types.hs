@@ -1,5 +1,8 @@
 {-# LANGUAGE DeriveFunctor     #-}
 {-# LANGUAGE FlexibleContexts  #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
 {-# LANGUAGE TemplateHaskell   #-}
@@ -7,13 +10,15 @@
 module Network.Docker.Types where
 
 import           Control.Applicative
-import           Control.Lens.TH
+import           Control.Lens.TH        hiding (makeLenses)
 import           Data.Aeson
 import           Data.Aeson.TH
 import           Data.Bool
 import qualified Data.Text              as T
 import           Network.Docker.Options
 import           Prelude                hiding (id)
+
+import           Network.Docker.Utils
 
 type URL = String
 type ApiVersion = String
@@ -39,8 +44,9 @@ data SSLOptions = SSLOptions {
   } deriving Show
 
 
-data ResourceId = ResourceId { _id :: String } deriving (Show, Eq)
+newtype ResourceId = ResourceId { _id :: String } deriving (Show, Eq)
 
+makeClassy ''ResourceId
 
 data DockerImage = DockerImage
                 { _imageId        :: ResourceId
@@ -51,6 +57,19 @@ data DockerImage = DockerImage
                 , _virtualSize    :: Int
                 } deriving (Show, Eq)
 
+instance FromJSON DockerImage where
+        parseJSON = withObject "docker image" $ \v ->
+            DockerImage <$> ResourceId <$> (v .: "Id")
+                        <*> (v .: "Created")
+                        <*> (v .:? "ParentId")
+                        <*> (v .: "RepoTags")
+                        <*> (v .: "Size")
+                        <*> (v .: "VirtualSize")
+
+makeLenses ''DockerImage
+
+-- instance HasResourceId DockerImage where
+--         resourceId = imageId
 
 data DockerVersion = DockerVersion
                   { _Version       :: String
@@ -60,6 +79,8 @@ data DockerVersion = DockerVersion
                   , _KernelVersion :: String
                   } deriving (Show, Eq)
 
+makeLenses ''DockerVersion
+deriveJSON dopts ''DockerVersion
 
 -- The JSON looks likes this:
 -- "Ports":[{"IP":"0.0.0.0","PrivatePort":55555,"PublicPort":55555,"Type":"tcp"}]
@@ -71,10 +92,22 @@ data PortMap = PortMap
             , _type        :: PortType
             } deriving (Show, Eq)
 
+makeLenses ''PortMap
+
+instance FromJSON PortMap where
+        parseJSON = withObject "portmap" $ \v ->
+            PortMap <$> (v .: "IP")
+                    <*> (v .: "PrivatePort")
+                    <*> (v .: "PublicPort")
+                    <*> (v .: "Type")
+
+
 data DeleteOpts = DeleteOpts
             { removeVolumes :: Bool
             , force         :: Bool
             }
+
+makeLenses ''DeleteOpts
 
 defaultDeleteOpts :: DeleteOpts
 defaultDeleteOpts = DeleteOpts False False
@@ -89,6 +122,21 @@ data DockerContainer = DockerContainer
                     , _status             :: String
                     , _ports              :: Maybe [PortMap]
                     } deriving (Show, Eq)
+
+instance FromJSON DockerContainer where
+        parseJSON = withObject "docker container" $ \v ->
+            DockerContainer <$> (ResourceId <$> (v .: "Id"))
+                            <*> (ResourceId <$> (v .: "Id"))
+                            <*> (v .: "Command")
+                            <*> (v .: "Created")
+                            <*> (v .: "Names")
+                            <*> (v .: "Status")
+                            <*> (v .:? "Ports")
+
+makeLenses ''DockerContainer
+
+instance HasResourceId DockerContainer where
+        resourceId = containerId
 
 
 data CreateContainerOpts = CreateContainerOpts
@@ -112,6 +160,8 @@ data CreateContainerOpts = CreateContainerOpts
                   , _disableNetwork :: Bool
                   , _exposedPorts   :: Maybe Object
                   } deriving (Show)
+
+makeLenses ''CreateContainerOpts
 
 defaultCreateOpts :: CreateContainerOpts
 defaultCreateOpts = CreateContainerOpts {
@@ -159,6 +209,13 @@ instance ToJSON CreateContainerOpts where
             , "ExposedPorts" .= _exposedPorts
             ]
 
+data RestartPolicy = RestartNever
+                   | RestartAlways
+                   | RestartOnFailure Int
+                   deriving (Show)
+
+makePrisms ''RestartPolicy
+
 data StartContainerOpts = StartContainerOpts
                         { _Binds           :: [T.Text]
                         , _Links           :: [T.Text]
@@ -170,6 +227,8 @@ data StartContainerOpts = StartContainerOpts
                         , _VolumesFrom     :: [T.Text]
                         , _RestartPolicy   :: RestartPolicy
                         } deriving (Show)
+
+makeLenses ''StartContainerOpts
 
 defaultStartOpts :: StartContainerOpts
 defaultStartOpts = StartContainerOpts
@@ -197,10 +256,6 @@ instance ToJSON StartContainerOpts where
             , "RestartPolicy" .= _RestartPolicy
             ]
 
-data RestartPolicy = RestartNever
-                   | RestartAlways
-                   | RestartOnFailure Int
-                   deriving (Show)
 
 instance ToJSON RestartPolicy where
   toJSON RestartNever = object [ "Name" .= (""::String)
@@ -212,43 +267,3 @@ instance ToJSON RestartPolicy where
   toJSON (RestartOnFailure n) = object [ "Name" .= ("on-failure"::String)
                                        , "MaximumRetryCount" .= n
                                        ]
-
-makeClassy ''ResourceId
-
-makeLenses ''DockerImage
-makeLenses ''DockerContainer
-makeLenses ''CreateContainerOpts
-
-instance HasResourceId DockerImage where
-        resourceId = imageId
-
-instance FromJSON DockerImage where
-        parseJSON = withObject "docker image" $ \v ->
-            DockerImage <$> ResourceId <$> (v .: "Id")
-                <*> (v .: "Created")
-                <*> (v .:? "ParentId")
-                <*> (v .: "RepoTags")
-                <*> (v .: "Size")
-                <*> (v .: "VirtualSize")
-
-instance FromJSON PortMap where
-        parseJSON = withObject "portmap" $ \v ->
-            PortMap <$> (v .: "IP")
-                <*> (v .: "PrivatePort")
-                <*> (v .: "PublicPort")
-                <*> (v .: "Type")
-
-instance HasResourceId DockerContainer where
-        resourceId = containerId
-
-instance FromJSON DockerContainer where
-        parseJSON = withObject "docker container" $ \v ->
-            DockerContainer <$> (ResourceId <$> (v .: "Id"))
-                <*> (ResourceId <$> (v .: "Id"))
-                <*> (v .: "Command")
-                <*> (v .: "Created")
-                <*> (v .: "Names")
-                <*> (v .: "Status")
-                <*> (v .:? "Ports")
-
-$(deriveJSON dopts ''DockerVersion)
