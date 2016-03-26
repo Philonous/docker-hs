@@ -11,14 +11,8 @@ import           Control.Lens.TH
 import           Data.Aeson
 import           Data.Aeson.TH
 import           Data.Bool
-import qualified Data.ByteString.Lazy   as BS
-import           Data.Default
-import qualified Data.Map               as Map
 import qualified Data.Text              as T
-import           GHC.Generics
 import           Network.Docker.Options
-import           Network.Wreq.Types     (Postable)
-import           OpenSSL.Session        (SSLContext)
 import           Prelude                hiding (id)
 
 type URL = String
@@ -82,6 +76,7 @@ data DeleteOpts = DeleteOpts
             , force         :: Bool
             }
 
+defaultDeleteOpts :: DeleteOpts
 defaultDeleteOpts = DeleteOpts False False
 
 
@@ -118,6 +113,7 @@ data CreateContainerOpts = CreateContainerOpts
                   , _exposedPorts   :: Maybe Object
                   } deriving (Show)
 
+defaultCreateOpts :: CreateContainerOpts
 defaultCreateOpts = CreateContainerOpts {
                              _hostname = ""
                             , _user = ""
@@ -163,11 +159,6 @@ instance ToJSON CreateContainerOpts where
             , "ExposedPorts" .= _exposedPorts
             ]
 
--- data CreateContainerResponse = CreateContainerResponse
---                               { _createdContainerId :: String
---                               , _warnings           :: Maybe [T.Text]
---                               } deriving (Show)
-
 data StartContainerOpts = StartContainerOpts
                         { _Binds           :: [T.Text]
                         , _Links           :: [T.Text]
@@ -177,9 +168,10 @@ data StartContainerOpts = StartContainerOpts
                         , _Privileged      :: Bool
                         , _Dns             :: [T.Text]
                         , _VolumesFrom     :: [T.Text]
-			, _RestartPolicy   :: RestartPolicy
+                        , _RestartPolicy   :: RestartPolicy
                         } deriving (Show)
 
+defaultStartOpts :: StartContainerOpts
 defaultStartOpts = StartContainerOpts
                 { _Binds = []
                 , _Links = []
@@ -202,7 +194,7 @@ instance ToJSON StartContainerOpts where
             , "Privileged" .= _Privileged
             , "Dns" .= _Dns
             , "VolumesFrom" .= _VolumesFrom
-	    , "RestartPolicy" .= _RestartPolicy
+            , "RestartPolicy" .= _RestartPolicy
             ]
 
 data RestartPolicy = RestartNever
@@ -211,13 +203,18 @@ data RestartPolicy = RestartNever
                    deriving (Show)
 
 instance ToJSON RestartPolicy where
-  toJSON RestartNever = object ["Name" .= (""::String), "MaximumRetryCount" .= (0::Int) ]
-  toJSON RestartAlways = object ["Name" .= ("always"::String), "MaximumRetryCount" .= (0::Int) ]
-  toJSON (RestartOnFailure n) = object ["Name" .= ("on-failure"::String), "MaximumRetryCount" .= n ]
+  toJSON RestartNever = object [ "Name" .= (""::String)
+                               , "MaximumRetryCount" .= (0::Int)
+                               ]
+  toJSON RestartAlways = object [ "Name" .= ("always"::String)
+                                , "MaximumRetryCount" .= (0::Int)
+                                ]
+  toJSON (RestartOnFailure n) = object [ "Name" .= ("on-failure"::String)
+                                       , "MaximumRetryCount" .= n
+                                       ]
 
 makeClassy ''ResourceId
 
--- makeLenses ''CreateContainerResponse
 makeLenses ''DockerImage
 makeLenses ''DockerContainer
 makeLenses ''CreateContainerOpts
@@ -226,7 +223,7 @@ instance HasResourceId DockerImage where
         resourceId = imageId
 
 instance FromJSON DockerImage where
-        parseJSON (Object v) =
+        parseJSON = withObject "docker image" $ \v ->
             DockerImage <$> ResourceId <$> (v .: "Id")
                 <*> (v .: "Created")
                 <*> (v .:? "ParentId")
@@ -235,7 +232,7 @@ instance FromJSON DockerImage where
                 <*> (v .: "VirtualSize")
 
 instance FromJSON PortMap where
-        parseJSON (Object v) =
+        parseJSON = withObject "portmap" $ \v ->
             PortMap <$> (v .: "IP")
                 <*> (v .: "PrivatePort")
                 <*> (v .: "PublicPort")
@@ -245,7 +242,7 @@ instance HasResourceId DockerContainer where
         resourceId = containerId
 
 instance FromJSON DockerContainer where
-        parseJSON (Object v) =
+        parseJSON = withObject "docker container" $ \v ->
             DockerContainer <$> (ResourceId <$> (v .: "Id"))
                 <*> (ResourceId <$> (v .: "Id"))
                 <*> (v .: "Command")
@@ -254,10 +251,4 @@ instance FromJSON DockerContainer where
                 <*> (v .: "Status")
                 <*> (v .:? "Ports")
 
--- instance FromJSON CreateContainerResponse where
---         parseJSON (Object v) =
---             CreateContainerResponse <$> (v .: "Id")
---                 <*> (v .:? "warnings")
-
 $(deriveJSON dopts ''DockerVersion)
-

@@ -1,6 +1,11 @@
 module Network.Docker.Utils where
 
-import           Data.Char
+import qualified Data.List as List
 
-strip_underscore :: String -> String
-strip_underscore (_:xs) = xs
+stripUnderscore :: String -> String
+stripUnderscore ('_':xs) = xs
+stripUnderscore xs = error $ List.intercalate " "
+                     [ "stripUnderscore:"
+                     , xs
+                     , "does not start with an underscore"
+                     ]

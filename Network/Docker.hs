@@ -4,19 +4,14 @@ module Network.Docker where
 
 import           Control.Applicative         ((<$>), (<*>))
 import           Control.Lens
-import           Data.Aeson                  (FromJSON, ToJSON, decode,
-                                              eitherDecode, toJSON)
-import           Data.Aeson.Lens             (key, _String)
-import           Data.Aeson.TH
+import           Data.Aeson                  (FromJSON, ToJSON, decode, toJSON)
+import           Data.Aeson.Lens             (key, _String, AsValue)
 import qualified Data.ByteString.Lazy        as L
-import           Data.Char
 import qualified Data.Text                   as T
-import           Network.Docker.Options
 import           Network.Docker.Types
 import           Network.HTTP.Client.OpenSSL
 import           Network.Wreq
-import           OpenSSL                     (withOpenSSL)
-import           OpenSSL.Session             (SSLContext, context)
+import           OpenSSL.Session             (SSLContext)
 import qualified OpenSSL.Session             as SSL
 import           Pipes
 import qualified Pipes.ByteString            as PB
@@ -34,12 +29,18 @@ defaultClientOpts = DockerClientOpts
 constructUrl :: URL -> ApiVersion -> Endpoint -> URL
 constructUrl url apiVersion endpoint = printf "%s%s%s" url apiVersion endpoint
 
+constructRelativeUrl :: String -> String
 constructRelativeUrl url = url :: String
 
+decodeResponse :: (Functor f, FromJSON a) =>
+                  f (Response L.ByteString)
+               -> f (Maybe a)
 decodeResponse r = decode <$> (^. responseBody) <$> r
 
+getOutOfResponse :: AsValue body => T.Text -> Response body -> Maybe T.Text
 getOutOfResponse k r = (^? responseBody . key k . _String) r
 
+getResponseStatusCode :: Response body -> Status
 getResponseStatusCode r = (^. responseStatus) r
 
 fullUrl :: DockerClientOpts -> Endpoint -> URL
@@ -55,6 +56,7 @@ setupSSLCtx (SSLOptions key cert) = do
   return ctx
 
 
+mkOpts :: IO SSLContext -> Network.Wreq.Options
 mkOpts c = defaults & manager .~ Left (opensslManagerSettings c)
 
 getSSL
@@ -83,9 +85,15 @@ _dockerPostQuery endpoint clientOpts@DockerClientOpts{ssl = NoSSL} postObject =
 _dockerPostQuery endpoint clientOpts@DockerClientOpts{ssl = SSL sslOpts} postObject =
   postSSL sslOpts (fullUrl clientOpts endpoint) postObject
 
+emptyPost :: String
 emptyPost = "" :: String
+
+_dockerEmptyPostQuery :: Endpoint -> DockerClientOpts -> IO (Response L.ByteString)
 _dockerEmptyPostQuery endpoint clientOpts = post (fullUrl clientOpts endpoint) (toJSON emptyPost)
 
+_dockerEmptyDeleteQuery :: Endpoint
+                        -> DockerClientOpts
+                        -> IO (Response L.ByteString)
 _dockerEmptyDeleteQuery endpoint clientOpts = delete (fullUrl clientOpts endpoint)
 
 getDockerVersion :: DockerClientOpts -> IO (Maybe DockerVersion)
@@ -135,10 +143,12 @@ getContainerLogsStream :: DockerClientOpts -> String -> IO ()
 getContainerLogsStream  clientOpts containerId = do
                 req <- PH.parseUrl (fullUrl clientOpts url)
                 let req' =  req {PH.method = "GET"}
-                PH.withManager PH.defaultManagerSettings $ \m  -> PH.withHTTP req' m  $ \resp -> runEffect $ PH.responseBody resp >-> PB.stdout
-        where url = (printf "/containers/%s/logs?stdout=1&stderr=1&follow=1" containerId)
+                m <- PH.newManager PH.defaultManagerSettings
+                PH.withHTTP req' m  $
+                  \resp -> runEffect $ PH.responseBody resp >-> PB.stdout
+        where url = (printf "/containers/%s/logs?stdout=1&stderr=1&follow=1"
+                            containerId)
 
 getContainerLogs :: DockerClientOpts -> String -> IO (L.ByteString)
 getContainerLogs  clientOpts containerId = (^. responseBody) <$> _dockerGetQuery url clientOpts
         where url = (printf "/containers/%s/logs?stdout=1&stderr=1" containerId)
-

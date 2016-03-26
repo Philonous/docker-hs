@@ -5,8 +5,5 @@ import           Network.Docker.Utils
 
 dopts :: Options
 dopts = defaultOptions {
-      fieldLabelModifier = strip_underscore
+      fieldLabelModifier = stripUnderscore
     }
-
-
-
